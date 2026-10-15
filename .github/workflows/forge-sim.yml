@@ -45,6 +45,21 @@ jobs:
         working-directory: forge
         run: mvn -B -q -DskipTests -Dcheckstyle.skip -pl forge-gui-desktop -am install
 
+      # Publish the built engine jar to the forge-bin branch (split into <95MB parts),
+      # so development machines without Maven Central access can compile against it.
+      - name: Publish Forge jar to forge-bin branch
+        run: |
+          JAR=$(ls forge/forge-gui-desktop/target/forge-gui-desktop-*-jar-with-dependencies.jar | head -1)
+          mkdir -p /tmp/bin && cd /tmp/bin
+          split -b 90m -d "$GITHUB_WORKSPACE/$JAR" forge.jar.part-
+          sha256sum "$GITHUB_WORKSPACE/$JAR" | cut -d' ' -f1 > forge.jar.sha256
+          echo "${{ env.FORGE_REF }}" > FORGE_REF
+          git init -q -b forge-bin
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -q -m "Forge jar @ ${{ env.FORGE_REF }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" forge-bin
+
       - name: Run AI vs AI Pauper match
         run: |
           JAR=$(ls forge/forge-gui-desktop/target/forge-gui-desktop-*-jar-with-dependencies.jar | head -1)
