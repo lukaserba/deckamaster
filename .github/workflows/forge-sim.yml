@@ -16,6 +16,9 @@ env:
   # Pinned Forge commit, so builds are reproducible. Bump deliberately.
   FORGE_REF: b6f135e649de6ab8fd98df3cf8b32905b02340ba
 
+permissions:
+  contents: write
+
 jobs:
   sim:
     runs-on: ubuntu-latest
@@ -52,6 +55,7 @@ jobs:
             -d "$GITHUB_WORKSPACE/decks/pauper-mono-red.dck" "$GITHUB_WORKSPACE/decks/pauper-mono-blue.dck" \
             -n "${{ github.event.inputs.games || '3' }}" \
             -c 300 2>&1 | tee ../match.log
+          echo "EXIT=${PIPESTATUS[0]}" | tee -a ../match.log
           grep -iE "won|winner|draw" ../match.log | tail -20 || true
 
       - name: Upload match log
@@ -60,3 +64,16 @@ jobs:
         with:
           name: match-log
           path: match.log
+
+      # Also publish the log to the ci-results branch so it can be read with plain git.
+      - name: Publish log to ci-results branch
+        if: always()
+        run: |
+          mkdir -p /tmp/results && cp match.log /tmp/results/ 2>/dev/null || echo "no log" > /tmp/results/match.log
+          cd /tmp/results
+          git init -q -b ci-results
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          echo "run ${{ github.run_id }} @ ${{ github.sha }}" > RUN.txt
+          git add -A && git commit -q -m "CI results for run ${{ github.run_id }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" ci-results
