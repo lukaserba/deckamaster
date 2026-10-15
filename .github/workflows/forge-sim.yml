@@ -52,7 +52,8 @@ jobs:
           mkdir -p run && cd run
           ln -s ../forge/forge-gui/res res
           java -Xmx3g -Djava.awt.headless=true -jar "../$JAR" sim \
-            -d "$GITHUB_WORKSPACE/decks/pauper-mono-red.dck" "$GITHUB_WORKSPACE/decks/pauper-mono-blue.dck" \
+            -D "$GITHUB_WORKSPACE/decks/" \
+            -d pauper-mono-red.dck pauper-mono-blue.dck \
             -n "${{ github.event.inputs.games || '3' }}" \
             -c 300 2>&1 | tee ../match.log
           echo "EXIT=${PIPESTATUS[0]}" | tee -a ../match.log
