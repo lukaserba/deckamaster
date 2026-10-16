@@ -50,18 +50,17 @@ h1, h2, h3 { font-family: "EB Garamond", serif; font-weight: 600; margin: 0; }
 #phases li.stop { border-color: var(--gold); }
 #phases li:hover { border-color: var(--muted); }
 
-#board { grid-area: board; display: grid; grid-template-rows: 1fr 1fr; min-height: 0; overflow: hidden; position: relative; }
+#board { grid-area: board; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1.35fr); min-height: 0; overflow: hidden; position: relative; }
 .side { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; min-height: 0; }
 .side.opp { justify-content: flex-start; }
 .side.me { justify-content: flex-end; }
-.battlefield { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.02); border: 1px dashed rgba(255,255,255,.05); min-height: 0; overflow: hidden; }
+.battlefield { flex: 1; display: flex; flex-direction: column; justify-content: safe center; gap: 4px; padding: 4px 8px; border-radius: 10px; background: rgba(255,255,255,.02); border: 1px dashed rgba(255,255,255,.05); min-height: 0; overflow-y: auto; }
 .bf-row { display: flex; align-items: center; gap: 8px; overflow-x: auto; overflow-y: hidden; min-height: calc(var(--bf-h) + 8px); padding: 4px 2px; scrollbar-width: thin; }
 .bf-row:empty { min-height: 0; padding: 0; }
 .battlefield .card { width: var(--bf-w); height: var(--bf-h); }
 .battlefield .card.tapped { margin: 0 calc((var(--bf-h) - var(--bf-w)) / 2 + 2px); }
 .hand { display: flex; gap: 6px; min-height: var(--card-h); justify-content: center; flex-wrap: nowrap; overflow-x: auto; padding: 2px; }
-.opp-hand { min-height: 0; }
-.opp-hand .card-back { width: 34px; height: 48px; }
+.opp-hand { display: none; }
 
 .player-bar { display: flex; align-items: center; gap: 14px; padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); cursor: pointer; }
 .player-bar.priority { box-shadow: 0 0 0 1px var(--gold) inset; }
@@ -118,7 +117,8 @@ h1, h2, h3 { font-family: "EB Garamond", serif; font-weight: 600; margin: 0; }
 
 /* Prompt */
 #promptBar { grid-area: prompt; display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); }
-#promptText { flex: 1; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+#promptText { flex: 1; font-size: 14px; line-height: 1.4; }
+#promptText .sub { color: var(--muted); margin-left: 8px; font-size: 12px; }
 #promptBar .buttons { display: flex; gap: 8px; }
 #promptBar.waiting #promptText { color: var(--muted); }
 

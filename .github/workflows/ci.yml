@@ -1,0 +1,135 @@
+name: Build, test and package
+
+# 1. Build the Forge engine (cached per pinned Forge commit).
+# 2. Build the Deckamaster server against it.
+# 3. Integration test: start the server and let a bot play full games over the WebSocket.
+# 4. Package a ready-to-run bundle and publish it as the "dev-build" GitHub release.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Pinned Forge commit, so builds are reproducible. Bump deliberately.
+  FORGE_REF: b6f135e649de6ab8fd98df3cf8b32905b02340ba
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout deckamaster
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Restore cached Forge build
+        id: forge-cache
+        uses: actions/cache@v4
+        with:
+          path: forge-build
+          key: forge-jar-${{ env.FORGE_REF }}
+
+      - name: Checkout Forge
+        uses: actions/checkout@v4
+        with:
+          repository: Card-Forge/forge
+          ref: ${{ env.FORGE_REF }}
+          path: forge
+          # Without a cached jar we need the whole source; with one, only the card data.
+          sparse-checkout: ${{ steps.forge-cache.outputs.cache-hit == 'true' && 'forge-gui/res' || '' }}
+
+      - name: Build Forge
+        if: steps.forge-cache.outputs.cache-hit != 'true'
+        working-directory: forge
+        run: |
+          mvn -B -q -DskipTests -Dcheckstyle.skip -pl forge-gui-desktop -am install
+          mkdir -p ../forge-build
+          cp forge-gui-desktop/target/forge-gui-desktop-*-jar-with-dependencies.jar ../forge-build/forge.jar
+
+      - name: Build server
+        run: server/build.sh forge-build/forge.jar
+
+      - name: Assemble bundle
+        run: |
+          mkdir -p bundle
+          cp forge-build/forge.jar server/target/deckamaster-server.jar bundle/
+          tools/slim-res.sh forge/forge-gui/res bundle/res
+          cp -R web decks bundle/
+          cp dist/run.command dist/run.bat dist/README.txt bundle/
+          cp forge/LICENSE bundle/FORGE-LICENSE.txt 2>/dev/null || true
+          chmod +x bundle/run.command
+
+      - name: Integration test (bot plays full games)
+        run: |
+          pip install -q websockets
+          cd bundle
+          java -Xmx3g -cp forge.jar:deckamaster-server.jar cc.deckamaster.server.Main 8080 web decks > ../server.log 2>&1 &
+          for i in $(seq 1 90); do grep -q listening ../server.log && break; sleep 1; done
+          cd ..
+          status=0
+          for pair in "Pauper Mono Red Burn|Pauper Mono Blue Tempo" "Pauper Mono Blue Tempo|Pauper Mono Red Burn"; do
+            IFS='|' read mine theirs <<< "$pair"
+            echo "::group::$mine vs $theirs"
+            timeout 300 python3 tools/bot.py ws://localhost:8080/ws "$mine" "$theirs" | tee -a bot.log || status=1
+            echo "::endgroup::"
+          done
+          curl -sf http://localhost:8080/ -o /dev/null || status=1
+          errors=$(grep -v "was not assigned\|Upcoming set" server.log | grep -c "Exception" || true)
+          echo "Server exceptions: $errors"
+          if [ "$errors" != "0" ]; then grep -v "was not assigned" server.log | grep -B2 -A20 Exception | head -80; status=1; fi
+          exit $status
+
+      - name: Publish logs to ci-results branch
+        if: always()
+        run: |
+          mkdir -p /tmp/results
+          cp server.log bot.log /tmp/results/ 2>/dev/null || true
+          cd /tmp/results
+          echo "run ${{ github.run_id }} @ ${{ github.sha }} : ${{ job.status }}" > RUN.txt
+          git init -q -b ci-results
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -q -m "CI results for run ${{ github.run_id }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" ci-results
+
+      # Development machines without Maven Central access compile against this copy of the jar.
+      - name: Publish Forge jar to forge-bin branch (when the pinned Forge changes)
+        run: |
+          current=$(git ls-remote --heads origin forge-bin | cut -f1)
+          if [ -n "$current" ]; then
+            git fetch -q --depth 1 origin forge-bin
+            if [ "$(git show FETCH_HEAD:FORGE_REF 2>/dev/null)" = "$FORGE_REF" ]; then echo "forge-bin up to date"; exit 0; fi
+          fi
+          mkdir -p /tmp/bin && cd /tmp/bin
+          split -b 90m -d "$GITHUB_WORKSPACE/forge-build/forge.jar" forge.jar.part-
+          sha256sum "$GITHUB_WORKSPACE/forge-build/forge.jar" | cut -d' ' -f1 > forge.jar.sha256
+          echo "$FORGE_REF" > FORGE_REF
+          git init -q -b forge-bin
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -q -m "Forge jar @ $FORGE_REF"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" forge-bin
+
+      - name: Package and publish dev-build release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mv bundle deckamaster
+          zip -qr -9 deckamaster.zip deckamaster
+          gh release delete dev-build --yes --cleanup-tag 2>/dev/null || true
+          gh release create dev-build deckamaster.zip --prerelease --target "$GITHUB_SHA" \
+            --title "Deckamaster dev build" \
+            --notes "Automatic build of ${GITHUB_SHA::7}. Download deckamaster.zip, unzip, and double-click run.command (macOS) or run.bat (Windows). Needs Java 17+ from https://adoptium.net."

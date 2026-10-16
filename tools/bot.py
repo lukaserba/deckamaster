@@ -29,6 +29,7 @@ class Bot:
         self.choices_seen = []
         self.result = None
         self.tried_prompts = {}
+        self.repeat = {}
         self.stats = {k: 0 for k in ('paid','targeted','attack_clicks','blocks','land','cast_attempts')}
 
     async def send(self, **m):
@@ -56,6 +57,19 @@ class Bot:
         if not p["ok"] and not p["cancel"] and not p["selectable"]:
             return  # waiting for the opponent
         my_turn = s and me and s["activePlayer"] == me["id"]
+
+        # Loop guard: the bot's heuristics can get stuck re-trying the same thing. If the exact
+        # same prompt keeps coming back, pick the next not-yet-picked card, else confirm or cancel.
+        full = (s and s["turn"], text, p["ok"], p["cancel"], tuple(p["selectable"]), tuple(p.get("picked", [])))
+        self.repeat[full] = self.repeat.get(full, 0) + 1
+        if self.repeat[full] > 6:
+            nxt = [i for i in p["selectable"] if i not in p.get("picked", [])]
+            if nxt and self.repeat[full] < 12:
+                return await self.send(t="card", id=nxt[0])
+            if p["ok"]:
+                return await self.send(t="ok")
+            if p["cancel"]:
+                return await self.send(t="cancel")
 
         if ok_label == "keep":
             return await self.send(t="ok")

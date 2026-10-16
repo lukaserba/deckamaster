@@ -120,8 +120,9 @@ function render() {
   [...s.stack].forEach((it) => {
     const d = el("div", "stack-item");
     const who = s.players.find((p) => p.id === it.controller);
-    d.innerHTML = `<b>${esc(it.source?.name || "Ability")}</b> · ${esc(who ? who.name : "")}<br>${esc(it.text)}`;
-    if (it.source) d.onmouseenter = () => showPreview(it.source);
+    const src = it.source && !it.source.hidden ? it.source : null;
+    d.innerHTML = `<b>${esc(src ? src.name : "Ability")}</b> · ${esc(who ? who.name : "")}<br>${esc(it.text)}`;
+    if (src) d.onmouseenter = () => showPreview(src);
     st.append(d);
   });
 
@@ -379,7 +380,14 @@ function showZone(title, cards) {
 
 function renderPrompt() {
   const p = app.prompt;
-  $("#promptText").textContent = p.text || "";
+  // Forge's priority prompts repeat turn/phase/stack on extra lines; the top bar already shows those.
+  const lines = (p.text || "").split("\n").filter(Boolean);
+  const box = $("#promptText");
+  box.innerHTML = "";
+  const isPriority = /^Priority:/.test(lines[0] || "");
+  box.append(el("span", null, isPriority ? "Your priority: play a card, or pass with OK." : (lines[0] || "")));
+  const rest = isPriority ? lines.filter((l) => /^Stack:/.test(l) && !/Empty/.test(l)) : lines.slice(1);
+  if (rest.length) box.append(el("span", "sub", rest.join(" · ")));
   setBtn($("#okBtn"), p.okLabel, p.ok);
   setBtn($("#cancelBtn"), p.cancelLabel, p.cancel);
   $("#promptBar").classList.toggle("waiting", !p.ok && !p.cancel);
