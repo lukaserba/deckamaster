@@ -1,0 +1,54 @@
+decks: ['Pauper Mono Blue Tempo', 'Pauper Mono Red Burn']
+Game over in 7.1s, turn 12: winner = Forge AI
+  life: Bot -4  vs  Forge AI 1
+  actions sent: 107
+  stats: {'paid': 11, 'targeted': 4, 'attack_clicks': 6, 'blocks': 0, 'land': 6, 'cast_attempts': 9}
+  prompts seen:
+      68  'Priority: Bot'
+      23  'Waiting for Forge AI...'
+      11  'Select creatures to attack Forge AI or select player/card yo'
+       5  'Select creatures to attack null or select player/card you wi'
+       3  'Monastery Swiftspear - Creature 1 / 2'
+       2  'Ghitu Lavarunner - Creature 1 / 2'
+       2  'Firebolt (31) - Firebolt (31) deals 2 damage to Forge AI.'
+       2  'Rift Bolt (27) - Rift Bolt (27) deals 3 damage to Forge AI.'
+       2  'Lightning Bolt (3) - Lightning Bolt (3) deals 3 damage to Fo'
+       1  'Bot, you have won the coin toss.'
+       1  'Bot, you are going first!'
+       1  'Firebolt (31) - Firebolt deals 2 damage to any target.'
+       1  'Firebolt (29) - Firebolt deals 2 damage to any target.'
+       1  'Firebolt (29) - Firebolt (29) deals 2 damage to Forge AI.'
+       1  'Rift Bolt (27) - Rift Bolt deals 3 damage to any target.'
+       1  'Lightning Bolt (3) - Lightning Bolt deals 3 damage to any ta'
+       1  ''
+  dialogs seen: ['Choose an ability to play', "Delver of Secrets - Revealing cards from Forge AI's library"]
+  last log lines: ['Bot: 0 Forge AI: 1 ', 'Forge AI has won because all opponents have lost', 'Bot has lost because life total reached 0', 'Turn 6', 'Match Duration 0m : 04s', 'Forge AI has restored control over themself']
+decks: ['Pauper Mono Blue Tempo', 'Pauper Mono Red Burn']
+Game over in 5.1s, turn 13: winner = Forge AI
+  life: Bot -3  vs  Forge AI 19
+  actions sent: 162
+  stats: {'paid': 9, 'targeted': 8, 'attack_clicks': 0, 'blocks': 2, 'land': 4, 'cast_attempts': 38}
+  prompts seen:
+      92  'Priority: Bot'
+      15  'Brainstorm (11)'
+      10  'Spellstutter Sprite - Creature 1 / 1'
+       9  'Waiting for Forge AI...'
+       6  'Snap (1) - Cannot target this player (Hexproof? Protection? '
+       4  'Brainstorm (11) - Bot draws three cards, then puts two cards'
+       4  'Preordain (23) - Bot scries 2. Bot draws a card.'
+       3  "Snap (1) - Return target creature to its owner's hand. Untap"
+       3  'Moon-Circuit Hacker - Creature 2 / 1'
+       3  'Select creatures to block Ghitu Lavarunner (80) or select an'
+       2  'Vapor Snag (55) - Cannot target this player (Hexproof? Prote'
+       2  'Delver of Secrets - Creature 1 / 1'
+       2  "Snap (1) - Return Kessig Flamebreather (84) to its owner's h"
+       2  'Select creatures to block Kessig Flamebreather (84) or selec'
+       2  'Preordain (21) - Bot scries 2. Bot draws a card.'
+       1  'Forge AI is going first.'
+       1  "Snap (1) - Return Ghitu Lavarunner (80) to its owner's hand."
+       1  "Vapor Snag (55) - Return target creature to its owner's hand"
+       1  "Vapor Snag (55) - Return Ghitu Lavarunner (80) to its owner'"
+       1  'Snap (1)'
+       1  ''
+  dialogs seen: ['Choose an ability to play', 'Choose order of cards to put into the library — Closest to top', "Rift Bolt is suspended with 1 time counters in  Forge AI's exile"]
+  last log lines: ['Bot: 0 Forge AI: 1 ', 'Forge AI has won because all opponents have lost', 'Bot has lost because life total reached 0', 'Turn 7', 'Match Duration 0m : 04s', 'Forge AI has restored control over themself']
