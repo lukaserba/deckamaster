@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deckamaster</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="vendor/mana/css/mana.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+  <!-- Lobby -->
+  <section id="lobby" class="screen">
+    <div class="lobby-card">
+      <h1>Deckamaster</h1>
+      <p class="sub">Play a match against the Forge AI.</p>
+      <label>Your name <input id="playerName" value="You" maxlength="24"></label>
+      <label>Your deck <select id="deckMine"></select></label>
+      <label>Opponent's deck <select id="deckTheirs"></select></label>
+      <button id="startBtn" class="primary" disabled>Connecting…</button>
+      <p class="fine">Rules engine: Forge (GPL-3.0). Card data and images: Scryfall.
+        Unofficial Fan Content permitted under the Wizards of the Coast Fan Content Policy. Not approved/endorsed by Wizards.</p>
+    </div>
+  </section>
+
+  <!-- Game table -->
+  <section id="table" class="screen hidden">
+    <header id="topbar">
+      <div id="turnInfo"></div>
+      <ol id="phases"></ol>
+      <button id="concedeBtn" class="ghost">Concede</button>
+    </header>
+
+    <main id="board">
+      <div class="side opp" id="oppSide">
+        <div class="player-bar" id="oppBar"></div>
+        <div class="hand opp-hand" id="oppHand"></div>
+        <div class="battlefield" id="oppField"></div>
+      </div>
+
+      <div class="middle">
+        <div id="stack"><h3>Stack</h3><div id="stackItems"></div></div>
+      </div>
+
+      <div class="side me" id="mySide">
+        <div class="battlefield" id="myField"></div>
+        <div class="player-bar" id="myBar"></div>
+        <div class="hand" id="myHand"></div>
+      </div>
+    </main>
+
+    <aside id="sidebar">
+      <div id="preview"><div class="preview-empty">Hover a card to see it here.</div></div>
+      <div id="log"><h3>Game log</h3><ol id="logItems"></ol></div>
+    </aside>
+
+    <footer id="promptBar">
+      <div id="promptText"></div>
+      <div class="buttons">
+        <button id="cancelBtn" class="ghost"></button>
+        <button id="okBtn" class="primary"></button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- Choice dialog -->
+  <div id="dialog" class="modal hidden">
+    <div class="modal-box">
+      <h2 id="dialogTitle"></h2>
+      <p id="dialogMessage"></p>
+      <div id="dialogItems"></div>
+      <input id="dialogInput" class="hidden">
+      <div class="modal-actions">
+        <span id="dialogHint"></span>
+        <button id="dialogReset" class="ghost">Reset</button>
+        <button id="dialogOk" class="primary">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="gameover" class="modal hidden">
+    <div class="modal-box center">
+      <h2 id="gameoverTitle"></h2>
+      <button id="againBtn" class="primary">Back to lobby</button>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

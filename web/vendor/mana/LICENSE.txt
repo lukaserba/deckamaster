@@ -1,0 +1,2 @@
+Mana font by Andrew Gioia (https://github.com/andrewgioia/mana), v1.18.0.
+Font: SIL OFL 1.1. CSS: MIT. Mana and card type symbols are copyright Wizards of the Coast.

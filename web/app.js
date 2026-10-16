@@ -1,0 +1,429 @@
+// Deckamaster web client: renders the Forge game state and sends player actions.
+"use strict";
+
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+
+const PHASES = [
+  ["UNTAP", "Untap"], ["UPKEEP", "Upkeep"], ["DRAW", "Draw"], ["MAIN1", "Main 1"],
+  ["COMBAT_BEGIN", "Combat"], ["COMBAT_DECLARE_ATTACKERS", "Attack"], ["COMBAT_DECLARE_BLOCKERS", "Block"],
+  ["COMBAT_FIRST_STRIKE_DAMAGE", "1st strike"], ["COMBAT_DAMAGE", "Damage"], ["COMBAT_END", "End combat"],
+  ["MAIN2", "Main 2"], ["END_OF_TURN", "End"], ["CLEANUP", "Cleanup"],
+];
+
+const app = {
+  ws: null,
+  state: null,
+  prompt: null,
+  selectable: new Set(),
+  // Phase stops (mirrors the server defaults; the player can toggle them).
+  stops: { mine: new Set(["MAIN1", "MAIN2"]), opponent: new Set(["COMBAT_DECLARE_ATTACKERS", "END_OF_TURN"]) },
+};
+
+// ------------------------------------------------------------------ connection
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  app.ws = new WebSocket(`${proto}://${location.host}/ws`);
+  app.ws.onmessage = (ev) => handle(JSON.parse(ev.data));
+  app.ws.onclose = () => {
+    $("#startBtn").disabled = true;
+    $("#startBtn").textContent = "Disconnected — reload";
+    toast("Connection to the server was lost.");
+  };
+}
+
+function send(msg) {
+  if (app.ws && app.ws.readyState === 1) app.ws.send(JSON.stringify(msg));
+}
+
+function handle(m) {
+  switch (m.t) {
+    case "hello": return onHello(m);
+    case "started": return showScreen("table");
+    case "state": app.state = m.state; return render();
+    case "prompt":
+      if (m.state) app.state = m.state;
+      app.prompt = m;
+      app.selectable = new Set(m.selectable || []);
+      renderPrompt();
+      return render();
+    case "choose": return openDialog(m);
+    case "notice": return toast(m.text);
+    case "gameover": return onGameOver(m);
+  }
+}
+
+// ------------------------------------------------------------------ lobby
+
+function onHello(m) {
+  for (const id of ["#deckMine", "#deckTheirs"]) {
+    const sel = $(id);
+    sel.innerHTML = "";
+    m.decks.forEach((d) => sel.append(new Option(d, d)));
+  }
+  if (m.decks.length > 1) $("#deckTheirs").selectedIndex = 1;
+  $("#startBtn").disabled = false;
+  $("#startBtn").textContent = "Start game";
+}
+
+$("#startBtn").onclick = () => {
+  send({ t: "start", deck: $("#deckMine").value, opponentDeck: $("#deckTheirs").value, name: $("#playerName").value || "You" });
+  $("#startBtn").disabled = true;
+  $("#startBtn").textContent = "Shuffling…";
+};
+
+function showScreen(name) {
+  $("#lobby").classList.toggle("hidden", name !== "lobby");
+  $("#table").classList.toggle("hidden", name !== "table");
+  if (name === "table") sendStops();
+}
+
+// ------------------------------------------------------------------ rendering
+
+function me() { return app.state?.players.find((p) => p.me); }
+function opp() { return app.state?.players.find((p) => !p.me); }
+
+function render() {
+  const s = app.state;
+  if (!s) return;
+  const my = me(), op = opp();
+  const active = s.players.find((p) => p.id === s.activePlayer);
+  $("#turnInfo").textContent = `Turn ${s.turn}${active ? " · " + (active.me ? "your turn" : active.name + "'s turn") : ""}`;
+  renderPhases(s, active);
+
+  if (op) {
+    renderBar($("#oppBar"), op);
+    const oh = $("#oppHand");
+    oh.innerHTML = "";
+    if (op.hand.length) op.hand.forEach((c) => oh.append(cardEl(c)));
+    else for (let i = 0; i < op.handCount; i++) oh.append(el("div", "card-back"));
+    renderField($("#oppField"), op, s);
+  }
+  if (my) {
+    renderBar($("#myBar"), my);
+    const mh = $("#myHand");
+    mh.innerHTML = "";
+    my.hand.forEach((c) => mh.append(cardEl(c)));
+    renderField($("#myField"), my, s);
+  }
+
+  const st = $("#stackItems");
+  st.innerHTML = "";
+  [...s.stack].forEach((it) => {
+    const d = el("div", "stack-item");
+    const who = s.players.find((p) => p.id === it.controller);
+    d.innerHTML = `<b>${esc(it.source?.name || "Ability")}</b> · ${esc(who ? who.name : "")}<br>${esc(it.text)}`;
+    if (it.source) d.onmouseenter = () => showPreview(it.source);
+    st.append(d);
+  });
+
+  const log = $("#logItems");
+  log.innerHTML = "";
+  (s.log || []).forEach((line) => log.append(el("li", null, line)));
+}
+
+function renderPhases(s, active) {
+  const ol = $("#phases");
+  ol.innerHTML = "";
+  const mine = active?.me;
+  PHASES.forEach(([key, label]) => {
+    const li = el("li", null, label);
+    if (key === s.phase) li.classList.add("current");
+    const set = mine ? app.stops.mine : app.stops.opponent;
+    if (set.has(key)) li.classList.add("stop");
+    li.title = `Click to toggle whether you stop here on ${mine ? "your" : "the opponent's"} turn`;
+    li.onclick = () => {
+      set.has(key) ? set.delete(key) : set.add(key);
+      sendStops();
+      render();
+    };
+    ol.append(li);
+  });
+}
+
+function sendStops() {
+  send({ t: "stops", mine: [...app.stops.mine], opponent: [...app.stops.opponent] });
+}
+
+function renderBar(node, p) {
+  node.innerHTML = "";
+  node.classList.toggle("priority", !!p.priority);
+  node.append(el("span", "name", p.name + (p.ai ? " (AI)" : "")));
+  node.append(el("span", "life", String(p.life)));
+  if (p.poison) node.append(el("span", "stat", `☠ ${p.poison}`));
+  node.append(el("span", "stat", `Hand ${p.handCount}`));
+  node.append(el("span", "stat", `Library ${p.libraryCount}`));
+  const gy = el("span", "stat", `Graveyard ${p.graveyard.length}`);
+  gy.title = p.graveyard.map((c) => c.name).join(", ");
+  gy.onclick = (e) => { e.stopPropagation(); showZone(`${p.name}'s graveyard`, p.graveyard); };
+  node.append(gy);
+  if (p.exile.length) {
+    const ex = el("span", "stat", `Exile ${p.exile.length}`);
+    ex.onclick = (e) => { e.stopPropagation(); showZone(`${p.name}'s exile`, p.exile); };
+    node.append(ex);
+  }
+  const mana = el("span", "stat mana");
+  for (const [k, v] of Object.entries(p.mana || {})) {
+    for (let i = 0; i < v; i++) mana.append(manaIcon(k));
+  }
+  node.append(mana);
+  node.onclick = () => send({ t: "player", id: p.id });
+}
+
+function renderField(node, p, s) {
+  node.innerHTML = "";
+  // Non-lands first, then lands, like a real table.
+  const cards = [...p.battlefield].filter((c) => !c.attachedTo);
+  const attachments = p.battlefield.filter((c) => c.attachedTo);
+  const order = [...cards.filter((c) => !c.land), ...cards.filter((c) => c.land)];
+  const blocking = blockMap(s);
+  order.forEach((c) => {
+    const e = cardEl(c, blocking);
+    attachments.filter((a) => a.attachedTo === c.id).forEach((a) => {
+      const b = el("span", "badge", "+" + a.name);
+      e.querySelector(".badges").append(b);
+    });
+    node.append(e);
+  });
+}
+
+function blockMap(s) {
+  const m = new Map();
+  for (const c of s.combat || []) for (const b of c.blockers) m.set(b, c.attacker);
+  return m;
+}
+
+function cardName(id) {
+  for (const p of app.state.players) for (const z of ["battlefield", "hand", "graveyard", "exile"]) {
+    const c = p[z].find((x) => x.id === id);
+    if (c) return c.name;
+  }
+  return "";
+}
+
+function cardEl(c, blocking) {
+  const e = el("div", "card");
+  e.dataset.id = c.id;
+  if (c.tapped) e.classList.add("tapped");
+  if (c.sick) e.classList.add("sick");
+  if (c.land) e.classList.add("land");
+  if (c.attacking) e.classList.add("attacking");
+  if (app.selectable.has(c.id)) e.classList.add("selectable");
+
+  const frame = el("div", "frame");
+  frame.append(el("div", "nm", c.name));
+  if (costParts(c.cost).length) frame.append(costEl(c.cost));
+  if (c.type) frame.append(el("div", "tp", c.type));
+  if (c.text) frame.append(el("div", "tx", c.text));
+  e.append(frame);
+
+  if (!c.hidden) {
+    const img = new Image();
+    img.alt = c.name;
+    img.loading = "lazy";
+    img.onload = () => e.classList.add("has-img");
+    // Forge's edition codes don't always exist on Scryfall: retry by name only.
+    img.onerror = () => {
+      if (!img.dataset.retry) { img.dataset.retry = 1; img.src = imageUrl(c, false); } else img.remove();
+    };
+    img.src = imageUrl(c);
+    e.prepend(img);
+  }
+
+  if (c.creature) e.append(el("div", "pt", `${c.power}/${c.toughness}`));
+  const badges = el("div", "badges");
+  if (c.attacking) badges.append(el("span", "badge atk", "Attacking"));
+  if (blocking && blocking.has(c.id)) badges.append(el("span", "badge blk", "Blocks " + cardName(blocking.get(c.id))));
+  if (c.damage) badges.append(el("span", "badge dmg", `${c.damage} dmg`));
+  for (const [k, v] of Object.entries(c.counters || {})) badges.append(el("span", "badge", `${v}× ${k}`));
+  if (c.token) badges.append(el("span", "badge", "Token"));
+  e.append(badges);
+
+  e.onmouseenter = () => showPreview(c);
+  e.onclick = () => send({ t: "card", id: c.id });
+  return e;
+}
+
+function imageUrl(c, withSet = true) {
+  const q = new URLSearchParams({ exact: c.name, format: "image", version: "normal" });
+  if (withSet && c.set) q.set("set", c.set.toLowerCase());
+  return `https://api.scryfall.com/cards/named?${q}`;
+}
+
+function manaIcon(sym) {
+  const s = String(sym).toLowerCase().replace(/[{}\/]/g, "");
+  return el("i", `ms ms-${s} ms-cost`);
+}
+
+// Forge sends costs like "4 {R} {R}", "{R}", "X {U}" or "-1" (no cost).
+function costParts(cost) {
+  if (!cost || cost === "-1") return [];
+  return cost.replace(/\}\s*\{/g, "} {").trim().split(/\s+/).map((p) => p.replace(/[{}]/g, "")).filter(Boolean);
+}
+
+function costEl(cost) {
+  const span = el("span", "cost");
+  costParts(cost).forEach((p) => span.append(manaIcon(p)));
+  return span;
+}
+
+function showPreview(c) {
+  const box = $("#preview");
+  box.innerHTML = "";
+  const big = el("div", "big");
+  if (!c.hidden) {
+    const img = new Image();
+    img.onerror = () => {
+      if (!img.dataset.retry) { img.dataset.retry = 1; img.src = imageUrl(c, false); } else img.remove();
+    };
+    img.src = imageUrl(c);
+    big.append(img);
+  }
+  box.append(big);
+  const t = el("div", "ptext");
+  const title = el("div", "ptitle", c.name + " ");
+  if (costParts(c.cost).length) title.append(costEl(c.cost));
+  t.append(title);
+  if (c.type) t.append(el("div", null, c.type));
+  if (c.text) t.append(el("div", null, c.text));
+  if (c.creature) t.append(el("div", null, `${c.power}/${c.toughness}`));
+  box.append(t);
+}
+
+function showZone(title, cards) {
+  if (!cards.length) return toast(`${title} is empty.`);
+  openDialog({ title, items: cards.map((c) => ({ label: c.name, card: c })), min: 0, max: 0, viewOnly: true });
+}
+
+// ------------------------------------------------------------------ prompt & buttons
+
+function renderPrompt() {
+  const p = app.prompt;
+  $("#promptText").textContent = p.text || "";
+  setBtn($("#okBtn"), p.okLabel, p.ok);
+  setBtn($("#cancelBtn"), p.cancelLabel, p.cancel);
+  $("#promptBar").classList.toggle("waiting", !p.ok && !p.cancel);
+}
+
+function setBtn(b, label, enabled) {
+  b.textContent = label || "";
+  b.disabled = !enabled;
+  b.classList.toggle("hidden", !label);
+}
+
+$("#okBtn").onclick = () => send({ t: "ok" });
+$("#cancelBtn").onclick = () => send({ t: "cancel" });
+$("#concedeBtn").onclick = () => { if (confirm("Concede this game?")) send({ t: "concede" }); };
+document.addEventListener("keydown", (e) => {
+  if (!$("#dialog").classList.contains("hidden")) return;
+  if (e.key === " " || e.key === "Enter") { if (!$("#okBtn").disabled) { e.preventDefault(); send({ t: "ok" }); } }
+  if (e.key === "Escape" && !$("#cancelBtn").disabled) send({ t: "cancel" });
+});
+
+// ------------------------------------------------------------------ choice dialog
+
+function openDialog(m) {
+  const dlg = $("#dialog");
+  const picked = [];
+  $("#dialogTitle").textContent = m.title || "Choose";
+  $("#dialogMessage").textContent = m.message || "";
+  const box = $("#dialogItems");
+  box.innerHTML = "";
+  const input = $("#dialogInput");
+  input.classList.toggle("hidden", !m.input);
+  input.value = m.initial || "";
+  input.type = m.numeric ? "number" : "text";
+
+  const single = !m.viewOnly && m.max === 1 && !m.ordered;
+  const hint = () => {
+    if (m.viewOnly) return "";
+    if (m.input) return "";
+    if (m.ordered) return `Click in order (first click = first). ${picked.length} chosen.`;
+    if (m.min === m.max) return `Choose ${m.min}. ${picked.length} chosen.`;
+    return `Choose ${m.min}–${m.max}. ${picked.length} chosen.`;
+  };
+  const refresh = () => {
+    [...box.children].forEach((node, i) => {
+      const pos = picked.indexOf(i);
+      node.classList.toggle("picked", pos >= 0);
+      node.querySelector(".num")?.remove();
+      if (pos >= 0 && m.ordered) node.append(el("span", "num", String(pos + 1)));
+    });
+    $("#dialogHint").textContent = hint();
+    const okBtn = $("#dialogOk");
+    okBtn.disabled = !m.viewOnly && !m.input && (picked.length < m.min || picked.length > m.max);
+  };
+
+  (m.items || []).forEach((it, i) => {
+    const wrap = el("div", "opt");
+    if (it.card) {
+      const c = cardEl(it.card);
+      c.onclick = null;
+      c.classList.remove("selectable", "tapped");
+      wrap.append(c);
+    } else {
+      wrap.append(el("div", "opt-text", it.label));
+    }
+    wrap.onclick = () => {
+      if (m.viewOnly) return;
+      if (single || m.buttons) return answer(m, [i]);
+      const pos = picked.indexOf(i);
+      if (pos >= 0) picked.splice(pos, 1);
+      else if (picked.length < m.max) picked.push(i);
+      refresh();
+    };
+    box.append(wrap);
+  });
+
+  const hideButtons = (single || m.buttons) && !m.viewOnly;
+  $("#dialogOk").classList.toggle("hidden", hideButtons && !(single && m.min === 0));
+  $("#dialogOk").textContent = m.viewOnly ? "Close" : (single && m.min === 0 ? "Cancel" : "Confirm");
+  $("#dialogReset").classList.toggle("hidden", hideButtons || m.viewOnly || !!m.input);
+  $("#dialogOk").onclick = () => {
+    if (m.viewOnly) {
+      if (m.id != null) return answer(m, []); // server is waiting for us to close a reveal
+      return dlg.classList.add("hidden");
+    }
+    if (m.input) return answer(m, [], input.value);
+    answer(m, picked);
+  };
+  $("#dialogReset").onclick = () => { picked.length = 0; refresh(); };
+  dlg.classList.remove("hidden");
+  refresh();
+  if (m.input) input.focus();
+}
+
+function answer(m, indices, text) {
+  const msg = { t: "answer", id: m.id, indices };
+  if (text != null) msg.text = text;
+  send(msg);
+  $("#dialog").classList.add("hidden");
+}
+
+// ------------------------------------------------------------------ misc
+
+function onGameOver(m) {
+  $("#gameoverTitle").textContent = m.winner ? `${m.winner} won the game` : "Game over";
+  $("#gameover").classList.remove("hidden");
+}
+
+$("#againBtn").onclick = () => location.reload();
+
+function toast(text) {
+  if (!text) return;
+  const t = el("div", "toast", text);
+  $("#toasts").append(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+
+connect();
