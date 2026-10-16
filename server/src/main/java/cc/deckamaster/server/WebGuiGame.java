@@ -141,6 +141,12 @@ public final class WebGuiGame extends AbstractGuiGame {
         JsonArray sel = new JsonArray();
         for (Integer id : selectableCards) sel.add(id);
         p.add("selectable", sel);
+        JsonArray hiCards = new JsonArray(), hiPlayers = new JsonArray();
+        for (Integer k : highlighted) {
+            if (k <= -1000) hiPlayers.add(-1000 - k); else hiCards.add(k);
+        }
+        p.add("picked", hiCards);
+        p.add("pickedPlayers", hiPlayers);
         send("prompt", p);
     }
 
@@ -288,12 +294,17 @@ public final class WebGuiGame extends AbstractGuiGame {
     /** The browser went away: release every blocked dialog and concede. */
     public void close() {
         closed = true;
-        pending.values().forEach(f -> f.complete(null));
-        try {
-            if (getGameView() != null && !getGameView().isGameOver() && getGameController() != null) {
-                onEdt(() -> getGameController().concede());
+        // Concede first, then release any dialog the game thread is blocked on. Doing both at once
+        // lets the game thread run concurrently with the concede and trips Forge's trigger handler.
+        onEdt(() -> {
+            try {
+                if (getGameView() != null && !getGameView().isGameOver() && getGameController() != null) {
+                    getGameController().concede();
+                }
+            } finally {
+                pending.values().forEach(f -> f.complete(null));
             }
-        } catch (RuntimeException ignored) { }
+        });
     }
 
     // ---------------------------------------------------------------- IGuiGame: view lifecycle
@@ -359,6 +370,22 @@ public final class WebGuiGame extends AbstractGuiGame {
         List<Integer> ids = new ArrayList<>();
         if (cards != null) for (CardView c : cards) { cardIndex.put(c.getId(), c); ids.add(c.getId()); }
         selectableCards = ids;
+        pushPrompt();
+    }
+
+    /** Cards/players already picked in the current multi-select or targeting input. */
+    private final Set<Integer> highlighted = ConcurrentHashMap.newKeySet();
+
+    @Override
+    public void setHighlighted(Iterable<? extends forge.trackable.TrackableObject> objects, boolean b) {
+        super.setHighlighted(objects, b);
+        if (objects != null) {
+            for (forge.trackable.TrackableObject o : objects) {
+                if (o == null) continue;
+                int key = o instanceof PlayerView ? -1000 - o.getId() : o.getId(); // players kept apart from cards
+                if (b) highlighted.add(key); else highlighted.remove(key);
+            }
+        }
         pushPrompt();
     }
 

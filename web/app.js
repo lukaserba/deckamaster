@@ -51,6 +51,8 @@ function handle(m) {
       if (m.state) app.state = m.state;
       app.prompt = m;
       app.selectable = new Set(m.selectable || []);
+      app.picked = new Set(m.picked || []);
+      app.pickedPlayers = new Set(m.pickedPlayers || []);
       renderPrompt();
       return render();
     case "choose": return openDialog(m);
@@ -154,6 +156,7 @@ function sendStops() {
 function renderBar(node, p) {
   node.innerHTML = "";
   node.classList.toggle("priority", !!p.priority);
+  node.classList.toggle("picked", !!(app.pickedPlayers && app.pickedPlayers.has(p.id)));
   node.append(el("span", "name", p.name + (p.ai ? " (AI)" : "")));
   node.append(el("span", "life", String(p.life)));
   if (p.poison) node.append(el("span", "stat", `☠ ${p.poison}`));
@@ -178,19 +181,27 @@ function renderBar(node, p) {
 
 function renderField(node, p, s) {
   node.innerHTML = "";
-  // Non-lands first, then lands, like a real table.
-  const cards = [...p.battlefield].filter((c) => !c.attachedTo);
+  const cards = p.battlefield.filter((c) => !c.attachedTo);
   const attachments = p.battlefield.filter((c) => c.attachedTo);
-  const order = [...cards.filter((c) => !c.land), ...cards.filter((c) => c.land)];
   const blocking = blockMap(s);
-  order.forEach((c) => {
-    const e = cardEl(c, blocking);
-    attachments.filter((a) => a.attachedTo === c.id).forEach((a) => {
-      const b = el("span", "badge", "+" + a.name);
-      e.querySelector(".badges").append(b);
+  const rowFor = (list) => {
+    const row = el("div", "bf-row");
+    list.forEach((c) => {
+      const e = cardEl(c, blocking);
+      attachments.filter((a) => a.attachedTo === c.id).forEach((a) => {
+        e.querySelector(".badges").append(el("span", "badge", "+" + a.name));
+      });
+      row.append(e);
     });
-    node.append(e);
-  });
+    return row;
+  };
+  const nonLands = rowFor(cards.filter((c) => !c.land));
+  const lands = rowFor(cards.filter((c) => c.land));
+  nonLands.classList.add("nonlands");
+  lands.classList.add("lands");
+  // Lands sit on the outside edge of the table, creatures towards the middle.
+  if (p.me) node.append(nonLands, lands);
+  else node.append(lands, nonLands);
 }
 
 function blockMap(s) {
@@ -215,6 +226,7 @@ function cardEl(c, blocking) {
   if (c.land) e.classList.add("land");
   if (c.attacking) e.classList.add("attacking");
   if (app.selectable.has(c.id)) e.classList.add("selectable");
+  if (app.picked && app.picked.has(c.id)) e.classList.add("picked");
 
   const frame = el("div", "frame");
   frame.append(el("div", "nm", c.name));
@@ -224,16 +236,15 @@ function cardEl(c, blocking) {
   e.append(frame);
 
   if (!c.hidden) {
-    const img = new Image();
-    img.alt = c.name;
-    img.loading = "lazy";
-    img.onload = () => e.classList.add("has-img");
-    // Forge's edition codes don't always exist on Scryfall: retry by name only.
-    img.onerror = () => {
-      if (!img.dataset.retry) { img.dataset.retry = 1; img.src = imageUrl(c, false); } else img.remove();
-    };
-    img.src = imageUrl(c);
-    e.prepend(img);
+    const src = Images.get(c.name, "normal");
+    if (src) {
+      const img = new Image();
+      img.alt = c.name;
+      img.onload = () => e.classList.add("has-img");
+      img.onerror = () => img.remove();
+      img.src = src;
+      e.prepend(img);
+    }
   }
 
   if (c.creature) e.append(el("div", "pt", `${c.power}/${c.toughness}`));
@@ -250,11 +261,75 @@ function cardEl(c, blocking) {
   return e;
 }
 
-function imageUrl(c, withSet = true) {
-  const q = new URLSearchParams({ exact: c.name, format: "image", version: "normal" });
-  if (withSet && c.set) q.set("set", c.set.toLowerCase());
-  return `https://api.scryfall.com/cards/named?${q}`;
-}
+// Card images: resolved once per card name through Scryfall's collection endpoint
+// (up to 75 names per request), then served from Scryfall's image CDN and the browser cache.
+// Re-renders never hit the Scryfall API again.
+const Images = (() => {
+  const urls = new Map();      // name -> { normal, large } | null (not found)
+  const queued = new Set();
+  let timer = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem("cardImages") || "{}");
+    for (const [k, v] of Object.entries(saved)) urls.set(k, v);
+  } catch (e) { /* storage unavailable */ }
+
+  function persist() {
+    try {
+      const obj = {};
+      for (const [k, v] of urls) if (v) obj[k] = v;
+      localStorage.setItem("cardImages", JSON.stringify(obj));
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function pick(card, name) {
+    if (card.image_uris) return card.image_uris;
+    const face = (card.card_faces || []).find((f) => f.name === name) || (card.card_faces || [])[0];
+    return face && face.image_uris;
+  }
+
+  async function flush() {
+    timer = null;
+    const names = [...queued].slice(0, 75);
+    names.forEach((n) => queued.delete(n));
+    if (!names.length) return;
+    try {
+      const res = await fetch("https://api.scryfall.com/cards/collection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ identifiers: names.map((name) => ({ name })) }),
+      });
+      const data = await res.json();
+      const found = new Set();
+      for (const card of data.data || []) {
+        // Match back to the requested name (double-faced cards may be requested by either face).
+        const faces = [card.name, ...(card.card_faces || []).map((f) => f.name)];
+        for (const n of names) {
+          if (faces.includes(n)) {
+            const iu = pick(card, n);
+            if (iu) { urls.set(n, { normal: iu.normal, large: iu.large || iu.normal }); found.add(n); }
+          }
+        }
+      }
+      names.forEach((n) => { if (!found.has(n)) urls.set(n, null); });
+      persist();
+      render();
+    } catch (e) {
+      names.forEach((n) => urls.set(n, null)); // offline or blocked: fall back to text cards
+    }
+    if (queued.size) schedule();
+  }
+
+  function schedule() { if (!timer) timer = setTimeout(flush, 120); }
+
+  return {
+    get(name, size) {
+      if (!name) return null;
+      if (!urls.has(name)) { urls.set(name, undefined); queued.add(name); schedule(); return null; }
+      const v = urls.get(name); // undefined while the lookup is in flight
+      return v ? v[size] : null;
+    },
+  };
+})();
 
 function manaIcon(sym) {
   const s = String(sym).toLowerCase().replace(/[{}\/]/g, "");
@@ -277,12 +352,11 @@ function showPreview(c) {
   const box = $("#preview");
   box.innerHTML = "";
   const big = el("div", "big");
-  if (!c.hidden) {
+  const src = !c.hidden && Images.get(c.name, "large");
+  if (src) {
     const img = new Image();
-    img.onerror = () => {
-      if (!img.dataset.retry) { img.dataset.retry = 1; img.src = imageUrl(c, false); } else img.remove();
-    };
-    img.src = imageUrl(c);
+    img.onerror = () => img.remove();
+    img.src = src;
     big.append(img);
   }
   box.append(big);
@@ -329,6 +403,7 @@ document.addEventListener("keydown", (e) => {
 // ------------------------------------------------------------------ choice dialog
 
 function openDialog(m) {
+  app.dialog = m;
   const dlg = $("#dialog");
   const picked = [];
   $("#dialogTitle").textContent = m.title || "Choose";
@@ -381,10 +456,10 @@ function openDialog(m) {
     box.append(wrap);
   });
 
-  const hideButtons = (single || m.buttons) && !m.viewOnly;
-  $("#dialogOk").classList.toggle("hidden", hideButtons && !(single && m.min === 0));
+  const hideButtons = !!((single || m.buttons) && !m.viewOnly);
+  $("#dialogOk").classList.toggle("hidden", !!(hideButtons && !(single && m.min === 0)));
   $("#dialogOk").textContent = m.viewOnly ? "Close" : (single && m.min === 0 ? "Cancel" : "Confirm");
-  $("#dialogReset").classList.toggle("hidden", hideButtons || m.viewOnly || !!m.input);
+  $("#dialogReset").classList.toggle("hidden", !!(hideButtons || m.viewOnly || m.input));
   $("#dialogOk").onclick = () => {
     if (m.viewOnly) {
       if (m.id != null) return answer(m, []); // server is waiting for us to close a reveal

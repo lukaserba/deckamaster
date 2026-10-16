@@ -1,6 +1,5 @@
 package cc.deckamaster.server;
 
-import forge.GuiDesktop;
 import forge.gui.GuiBase;
 import forge.localinstance.properties.ForgePreferences;
 import forge.model.FModel;
@@ -24,9 +23,8 @@ public final class Main {
         Path deckDir = Path.of(args.length > 2 ? args[2] : "decks").toAbsolutePath();
 
         long t0 = System.currentTimeMillis();
-        // GuiDesktop is only used for paths, threading helpers and preferences; with
-        // java.awt.headless=true it never opens a window.
-        GuiBase.setInterface(new GuiDesktop());
+        // Forge's desktop glue (paths, threading, preferences) minus anything that needs a screen.
+        GuiBase.setInterface(new HeadlessGui());
         FModel.initialize(null, prefs -> {
             // A server has no audio device; Forge's sound system would throw on every event.
             prefs.setPref(ForgePreferences.FPref.UI_ENABLE_SOUNDS, false);
